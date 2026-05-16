@@ -10,6 +10,7 @@ import os
 import sys
 import subprocess
 import argparse
+# pyrefly: ignore [missing-import]
 from PIL import Image, ImageTk
 
 # ── IMPORTS FROM PACKAGES ──────────────────────────────────
@@ -17,6 +18,13 @@ from config import *
 from dashboard.dashboard_ui import DashboardUI
 from dashboard.map_engine import MapEngine
 from dashboard.adas_vision_utils import annotate_bev, JunctionDetector, RoundaboutNavigator
+from core.telemetry import TelemetryLogger
+
+try:
+    from dashboard.web_dashboard import WebDashboard
+    _WEB_AVAILABLE = True
+except ImportError:
+    _WEB_AVAILABLE = False
 
 try:
     from hardware.serial_handler import STM32_SerialHandler
@@ -176,16 +184,25 @@ class BFMC_App:
             except Exception as e:
                 print(f"[SYS] Warning: Failed to load AI models: {e}")
 
+        # Telemetry logger (always on — writes to logs/)
+        self.telemetry = TelemetryLogger()
+
+        # Web dashboard (opt-in via --web flag)
+        self.web: "WebDashboard | None" = None
+        if getattr(args, "web", False) and _WEB_AVAILABLE:
+            self.web = WebDashboard()
+            self.web.start()
+
         # Bindings & Loops
         if not self.headless:
             self.root.bind("<KeyPress>", self._on_key_press)
             self.root.bind("<KeyRelease>", self._on_key_release)
             # Bind clicks directly to map canvas actions
             self.ui.map_canvas.bind("<Button-1>", self.on_map_click)       # Left Click
-        
+
         self.set_mode("DRIVE")
         self.control_loop()
-        
+
         if not self.headless:
             self.render_map()
 
@@ -499,9 +516,9 @@ class BFMC_App:
             # --- OVERRIDE TIMERS FOR NEW LOGIC ---
             if active_sign_cmd:
                 if "crosswalk" in active_sign_cmd.lower() or "pedestrian" in active_sign_cmd.lower():
-                    self.crosswalk_timer = time.time() + 5.0
+                    self.crosswalk_timer = time.time() + CROSSWALK_HOLD_S
                 elif "priority" in active_sign_cmd.lower():
-                    self.priority_timer = time.time() + 10.0
+                    self.priority_timer = time.time() + PRIORITY_HOLD_S
                 elif "park" in active_sign_cmd.lower():
                     if not getattr(self, 'has_parked_here', False):
                         self.execute_parking_playback(reverse=False)
@@ -520,7 +537,7 @@ class BFMC_App:
 
             # 5. Calculate Steering & Speed Control
             if self.is_auto_mode and not self.is_playing_back:
-                if time.time() - self.auto_start_time > 5.0 and self.imu.is_calibrated:
+                if time.time() - self.auto_start_time > AUTO_CALIBRATION_WAIT_S and self.imu.is_calibrated:
                     self.is_calibrating = False
                     upcoming_curve = self._estimate_upcoming_curve()
                     ctrl_out = self.controller.compute(
@@ -563,11 +580,11 @@ class BFMC_App:
 
                         # Multipliers
                         if time.time() < self.crosswalk_timer:
-                            target_speed *= 0.8
+                            target_speed *= CROSSWALK_SPEED_MULT
                         if time.time() < self.priority_timer:
-                            target_speed *= 0.8
+                            target_speed *= PRIORITY_SPEED_MULT
                         if is_highway:
-                            target_speed *= 1.3
+                            target_speed *= HIGHWAY_SPEED_MULT
                         # --------------------------------------------------------
                 else:
                     self.is_calibrating = True
@@ -650,9 +667,9 @@ class BFMC_App:
                 
                 if not is_finishing_reverse and hasattr(self.ui, 'chk_parking') and self.ui.chk_parking.get():
                     self.is_waiting_for_reverse = True
-                    self.reverse_timer = time.time() + 10.0
+                    self.reverse_timer = time.time() + PARKING_WAIT_S
                     if not self.headless:
-                        self.ui.log_event("Parking reached. Waiting 10s for Auto-Reverse...", "WARN")
+                        self.ui.log_event(f"Parking reached. Waiting {PARKING_WAIT_S:.0f}s for Auto-Reverse...", "WARN")
                 else:
                     if not self.headless:
                         self.ui.log_event("Parking sequence fully complete.", "SUCCESS")
@@ -764,6 +781,93 @@ class BFMC_App:
             self.last_path_tuple = None
         # ------------------------------------------------------
 
+        # ── TELEMETRY LOG (rate-limited to 1 Hz, non-blocking) ──
+        yolo_labels_str = ", ".join(ai_labels) if 'ai_labels' in dir() and ai_labels else ""
+        self.telemetry.log(
+            loop_hz     = f"{1.0/dt:.1f}" if dt > 0 else "0",
+            mode        = "AUTO" if self.is_auto_mode else "MANUAL",
+            speed_pwm   = int(self.current_speed),
+            steer_deg   = round(self.current_steer, 2),
+            yaw_deg     = round(self.imu.get_yaw(), 2),
+            roll_deg    = round(self.imu.get_roll(), 2),
+            pitch_deg   = round(self.imu.get_pitch(), 2),
+            car_x       = round(self.car_x, 3),
+            car_y       = round(self.car_y, 3),
+            lane_anchor = getattr(lane_result, 'anchor', ''),
+            target_x    = round(getattr(lane_result, 'target_x', 320.0), 1),
+            lateral_err_px = round(getattr(lane_result, 'lateral_error_px', 0.0), 1),
+            lane_confidence = round(getattr(lane_result, 'confidence', 0.0), 2),
+            active_sign = active_sign_cmd or '',
+            yolo_labels = yolo_labels_str,
+        )
+
+        # ── CAMERA RECORDING FRAME ────────────────────────────
+        if frame is not None and self.telemetry.is_recording:
+            self.telemetry.write_frame(frame)
+
+        # ── WEB DASHBOARD PUSH + COMMAND PROCESSING ──────────
+        if self.web is not None:
+            battery_v_web = getattr(self.handler.status, 'battery_voltage', 0.0) if hasattr(self.handler, 'status') else 0.0
+            bat_pct_web   = max(0, min(100, int((battery_v_web - BATTERY_MIN_V) / (BATTERY_MAX_V - BATTERY_MIN_V) * 100))) if battery_v_web > 0 else 0
+            self.web.push_telemetry(
+                mode             = "AUTO" if self.is_auto_mode else "MANUAL",
+                speed_pwm        = int(self.current_speed),
+                steer_deg        = round(self.current_steer, 2),
+                yaw_deg          = round(self.imu.get_yaw(), 2),
+                roll_deg         = round(self.imu.get_roll(), 2),
+                pitch_deg        = round(self.imu.get_pitch(), 2),
+                car_x            = round(self.car_x, 3),
+                car_y            = round(self.car_y, 3),
+                lane_anchor      = getattr(lane_result, 'anchor', ''),
+                target_x         = round(getattr(lane_result, 'target_x', 320.0), 1),
+                lateral_err_px   = round(getattr(lane_result, 'lateral_error_px', 0.0), 1),
+                lane_confidence  = round(getattr(lane_result, 'confidence', 0.0), 2),
+                active_sign      = active_sign_cmd or '',
+                yolo_labels      = ai_labels if 'ai_labels' in dir() else [],
+                battery_pct      = bat_pct_web,
+                loop_hz          = round(1.0 / dt, 1) if dt > 0 else 0.0,
+                is_recording     = self.telemetry.is_recording,
+                base_speed       = float(self.ui.slider_base_speed.get() if not self.headless else base_speed),
+                steer_mult       = float(self.ui.slider_steer_mult.get() if not self.headless else 1.0),
+                sign_detect_m    = float(self.ui.slider_sign_detect.get() if not self.headless else SIGN_DETECT_DEFAULT_M),
+                sign_act_m       = float(self.ui.slider_sign_act.get() if not self.headless else SIGN_ACT_DEFAULT_M),
+            )
+            if frame is not None:
+                self.web.push_frame(frame)
+
+            for web_cmd in self.web.pop_commands():
+                action = web_cmd.get("action", "")
+                value  = web_cmd.get("value")
+                if action == "e_stop":
+                    self.is_auto_mode = False
+                    self.current_speed = 0.0
+                    self.current_steer = 0.0
+                    if self.is_connected:
+                        self.handler.set_speed(0)
+                        self.handler.set_steering(0)
+                    if not self.headless:
+                        self.ui.log_event("🛑 WEB: Emergency Stop triggered!", "DANGER")
+                elif action == "toggle_auto":
+                    self.toggle_auto_mode()
+                elif action == "toggle_adas":
+                    self.toggle_adas_mode()
+                elif action == "clear_route":
+                    self.clear_route()
+                elif action == "start_recording":
+                    if not self.telemetry.is_recording:
+                        self.toggle_recording()
+                elif action == "stop_recording":
+                    if self.telemetry.is_recording:
+                        self.toggle_recording()
+                elif action == "set_base_speed" and value is not None and not self.headless:
+                    self.ui.slider_base_speed.set(float(value))
+                elif action == "set_steer_mult" and value is not None and not self.headless:
+                    self.ui.slider_steer_mult.set(float(value))
+                elif action == "set_sign_detect" and value is not None and not self.headless:
+                    self.ui.slider_sign_detect.set(float(value))
+                elif action == "set_sign_act" and value is not None and not self.headless:
+                    self.ui.slider_sign_act.set(float(value))
+
         # ── UI UPDATES ────────────────────────────────────────
         if not self.headless:
             hz = 1.0 / dt if dt > 0 else 0.0
@@ -774,24 +878,20 @@ class BFMC_App:
             if self.is_playing_back: mode_str = "REVERSE PARKING" if self.is_parking_reverse_mode else "PARKING PLAYBACK"
             if self.is_calibrating: mode_str = "CALIBRATING..."
             
-            # Calculate battery percentage (assuming LiPo: 3.0V = 0%, 4.2V = 100%)
-            battery_v = getattr(self.handler.status, 'battery_voltage', 0.0) if hasattr(self.handler, 'status') else 0.0
-            battery_pct = max(0, min(100, int((battery_v - 3.0) / (4.2 - 3.0) * 100))) if battery_v > 0 else 0
-            
+            # Battery — calculated once and reused throughout this UI block
+            battery_v   = getattr(self.handler.status, 'battery_voltage', 0.0) if hasattr(self.handler, 'status') else 0.0
+            battery_pct = max(0, min(100, int((battery_v - BATTERY_MIN_V) / (BATTERY_MAX_V - BATTERY_MIN_V) * 100))) if battery_v > 0 else 0
+            battery_color = "green" if battery_pct > 50 else "orange" if battery_pct > 20 else "red"
+
             self.ui.lbl_telemetry.config(
                 text=f"SPD: {int(self.current_speed)} | STR: {self.current_steer:.1f}° | BAT: {battery_pct}% | LMT: {base_speed} | [{mode_str}]"
             )
 
             imu_connected = self.imu.get_has_hardware()
             imu_color = THEME["success"] if imu_connected else THEME["danger"]
-            imu_text = "IMU: OK" if imu_connected else "IMU: LOST"
+            imu_text  = "IMU: OK" if imu_connected else "IMU: LOST"
             imu_values = f"R:{self.imu.get_roll():.1f}° P:{self.imu.get_pitch():.1f}° Y:{self.imu.get_yaw():.1f}°"
             self.ui.lbl_imu.config(text=f"{imu_text} | {imu_values}", fg=imu_color)
-            
-            # Update battery status
-            battery_v = getattr(self.handler.status, 'battery_voltage', 0.0) if hasattr(self.handler, 'status') else 0.0
-            battery_pct = max(0, min(100, int((battery_v - 3.0) / (4.2 - 3.0) * 100))) if battery_v > 0 else 0
-            battery_color = "green" if battery_pct > 50 else "orange" if battery_pct > 20 else "red"
             self.ui.lbl_battery.config(text=f"BAT: {battery_pct}% ({battery_v:.1f}V)", fg=battery_color)
             
             # --- Update Indicators ---
@@ -838,6 +938,17 @@ class BFMC_App:
         else:
             self.root.after(50, self.control_loop)
 
+    def open_imu_panel(self):
+        from dashboard.imu_3d_panel import IMU3DPanel
+        if hasattr(self, "_imu_panel"):
+            try:
+                if self._imu_panel.win.winfo_exists():
+                    self._imu_panel.lift()
+                    return
+            except tk.TclError:
+                pass
+        self._imu_panel = IMU3DPanel(self.root, self.imu)
+
     def save_config(self): pass
     def load_config(self): pass
 
@@ -850,6 +961,18 @@ class BFMC_App:
             else:
                 self.ui.btn_adas.config(text="ADAS ASSIST: OFF", bg="#444")
                 self.ui.log_event("⚠️ ADAS ASSIST DISABLED.", "WARN")
+
+    def toggle_recording(self):
+        if self.telemetry.is_recording:
+            self.telemetry.stop_recording()
+            if not self.headless:
+                self.ui.btn_record.config(text="⏺ START RECORDING", bg="#c0392b")
+                self.ui.log_event("⏹ Camera recording stopped.", "WARN")
+        else:
+            path = self.telemetry.start_recording()
+            if not self.headless:
+                self.ui.btn_record.config(text="⏹ STOP RECORDING", bg="#27ae60")
+                self.ui.log_event(f"⏺ Recording started → {path}", "SUCCESS")
 
     def clear_route(self):
         self.start_node = None; self.end_node = None; self.pass_nodes = []; self.path = []
@@ -877,6 +1000,7 @@ class BFMC_App:
             self.handler.disconnect()
         self.imu.stop()
         self.v2x_client.stop()
+        self.telemetry.stop()
         if not self.headless:
             self.root.destroy()
 
@@ -884,7 +1008,8 @@ class BFMC_App:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="BFMC 2026 Unified Autonomous Stack")
     parser.add_argument("--headless", action="store_true", help="Run in terminal only, no Tkinter GUI")
-    parser.add_argument("--no-v2x", action="store_true", help="Do not start the background V2X servers")
+    parser.add_argument("--no-v2x",  action="store_true", help="Do not start the background V2X servers")
+    parser.add_argument("--web",     action="store_true", help="Start the Flask web dashboard on port 8080")
     args = parser.parse_args()
 
     v2x_procs = []

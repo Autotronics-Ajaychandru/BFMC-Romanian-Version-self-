@@ -66,7 +66,8 @@ class HybridLaneTracker:
         self.right_conf = 0
         self.left_stale  = 0
         self.right_stale = 0
-        self.estimated_lane_width = 280.0
+        # DST spans x=150-490 (340 px) = one full lane in the recalibrated bird's-eye view.
+        self.estimated_lane_width = 340.0
         self.right_lost_frames = 0
         self.dead_reckoner = DeadReckoningNavigator()
 
@@ -170,10 +171,11 @@ class HybridLaneTracker:
         else:
             self.right_lost_frames += 1
             if has_left:
-                target_yaw = getattr(self, 'right_yaw_at_loss', current_yaw) + 15.0
-                delta_yaw_deg = current_yaw - target_yaw
-                base_x = 320.0 - (delta_yaw_deg * 20.0)
-                anchor = "IMU_15_DEG_DEAD_RECKONING"
+                # Right line not visible — use left line + half lane width to stay centred.
+                # This is the normal case on the BFMC track where only the inner boundary
+                # (centre divider) is in the camera's field of view.
+                base_x = ev(sl) + hw
+                anchor = "LEFT_LANE_ONLY"
             elif self.right_lost_frames < 80: # ~4 seconds at 20 Hz
                 # The user requested exactly a 5-degree left steer when BOTH lines drop.
                 # So we aim the car 5 degrees to the left of wherever it was pointing when the line vanished.

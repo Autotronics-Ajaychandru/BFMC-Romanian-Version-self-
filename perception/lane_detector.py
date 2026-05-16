@@ -67,7 +67,10 @@ class VisualOdometry:
 
 class LaneDetector:
     def __init__(self):
-        self.SRC_PTS = np.float32([[200, 260], [440, 260], [40, 450], [600, 450]])
+        # SRC calibrated from actual lane line positions in the BFMC video:
+        # left line at (x~80,y=290) top and (x~0,y=430) bottom.
+        # DST left boundary (x=150) = left lane line; center (x=320) = lane centre.
+        self.SRC_PTS = np.float32([[80, 290], [280, 290], [0, 430], [200, 430]])
         self.DST_PTS = np.float32([[150, 0], [490, 0], [150, 480], [490, 480]])
         self.M_forward = cv2.getPerspectiveTransform(self.SRC_PTS, self.DST_PTS)
         self.clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
@@ -103,16 +106,23 @@ class LaneDetector:
             M_use = self.M_forward
 
         warped_colour = cv2.warpPerspective(process_frame, M_use, (640, 480))
-        lab = cv2.cvtColor(warped_colour, cv2.COLOR_BGR2LAB)
-        L = self.clahe.apply(lab[:, :, 0])
-        
-        mean_l = np.mean(L)
-        if mean_l < 100:
-            L = cv2.convertScaleAbs(L, alpha=1.0 + (100 - mean_l)/200, beta=int((100 - mean_l)*0.6))
-        elif mean_l > 180:
-            L = cv2.convertScaleAbs(L, alpha=1.0 - (mean_l - 180)/350, beta=int(-(mean_l - 180)*0.4))
+        # Blank out camera-mount hardware that appears in the lower warped region
+        warped_colour[360:480, 280:460] = 0
 
-        binary = cv2.adaptiveThreshold(L, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31, 15)
+        lab = cv2.cvtColor(warped_colour, cv2.COLOR_BGR2LAB)
+        L = lab[:, :, 0]   # Raw L — no CLAHE (CLAHE amplifies road-texture noise)
+
+        # Gentle brightness normalisation for indoor lighting variation
+        mean_l = np.mean(L)
+        if mean_l < 80:
+            L = cv2.convertScaleAbs(L, alpha=1.0 + (80 - mean_l) / 100, beta=0)
+        elif mean_l > 160:
+            L = cv2.convertScaleAbs(L, alpha=1.0 - (mean_l - 160) / 250, beta=0)
+
+        # Blur suppresses residual texture noise, then global threshold isolates
+        # bright-white lane markings (L≈200+) away from brownish road surface (L≈80-130).
+        L_blur = cv2.GaussianBlur(L, (5, 5), 0)
+        _, binary = cv2.threshold(L_blur, 155, 255, cv2.THRESH_BINARY)
         warped_binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)))
         
         map_hint = upcoming_curve if upcoming_curve in ("LEFT", "RIGHT") else "STRAIGHT"
