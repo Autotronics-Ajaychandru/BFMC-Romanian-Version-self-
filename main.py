@@ -938,6 +938,17 @@ class BFMC_App:
         else:
             self.root.after(50, self.control_loop)
 
+    def open_imu_panel(self):
+        from dashboard.imu_3d_panel import IMU3DPanel
+        if hasattr(self, "_imu_panel"):
+            try:
+                if self._imu_panel.win.winfo_exists():
+                    self._imu_panel.lift()
+                    return
+            except tk.TclError:
+                pass
+        self._imu_panel = IMU3DPanel(self.root, self.imu)
+
     def save_config(self): pass
     def load_config(self): pass
 

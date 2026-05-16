@@ -32,6 +32,13 @@ class DashboardUI:
         self.lbl_conn.pack(side=tk.LEFT, padx=15)
         self.lbl_telemetry = tk.Label(status, text="SPD: 0 | STR: 0° | LMT: 150 | [MANUAL]", bg=THEME["panel"], fg=THEME["accent"], font=("Courier", 11, "bold"))
         self.lbl_telemetry.pack(side=tk.LEFT, padx=20)
+        self.btn_imu_3d = tk.Button(
+            status, text="IMU 3D VIEW",
+            bg="#37474f", fg="white", relief="flat",
+            font=("Helvetica", 9, "bold"), activebackground="#546e7a",
+            command=self.controller.open_imu_panel,
+        )
+        self.btn_imu_3d.pack(side=tk.LEFT, padx=5)
         self.lbl_imu = tk.Label(status, text="IMU: DISCONNECTED | R:0.0° P:0.0° Y:0.0°", bg=THEME["panel"], fg="grey", font=("Courier", 10, "bold"))
         self.lbl_imu.pack(side=tk.RIGHT, padx=15)
         self.lbl_battery = tk.Label(status, text="BAT: --%", bg=THEME["panel"], fg="orange", font=("Courier", 10))
