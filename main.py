@@ -201,7 +201,12 @@ class BFMC_App:
             self.ui.map_canvas.bind("<Button-1>", self.on_map_click)       # Left Click
 
         self.set_mode("DRIVE")
-        self.control_loop()
+        if self.headless:
+            while True:
+                self.control_loop()
+                time.sleep(0.05)
+        else:
+            self.control_loop()
 
         if not self.headless:
             self.render_map()
@@ -932,10 +937,7 @@ class BFMC_App:
         if self.headless:
             print(f"[CTRL] Spd:{int(self.current_speed):4d} | Str:{self.current_steer:5.1f}° | Yaw:{self.imu.get_yaw():5.1f}° | Pos:({self.car_x:.1f},{self.car_y:.1f}) | {1/dt:.0f}Hz", end="\r")
 
-        if self.headless:
-            time.sleep(0.05)
-            self.control_loop()
-        else:
+        if not self.headless:
             self.root.after(50, self.control_loop)
 
     def open_imu_panel(self):
