@@ -2,7 +2,15 @@ import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
 from datetime import datetime
-from config import THEME, SIGN_MAP
+from config import (
+    THEME, SIGN_MAP,
+    DASH_BASE_SPEED_DEFAULT, DASH_SIM_SPEED_DEFAULT,
+    DASH_STEER_MULT_DEFAULT, DASH_OVERTAKE_DIST_DEFAULT,
+    DASH_OVERTAKE_TIME_DEFAULT, DASH_SIGN_DETECT_DEFAULT,
+    DASH_SIGN_ACT_DEFAULT,
+)
+
+_LOG_MAX_LINES = 200
 
 class DashboardUI:
     def __init__(self, root, controller):
@@ -79,6 +87,8 @@ class DashboardUI:
         self.btn_auto.grid(row=2, column=0, sticky="ew", padx=3, pady=3)
         self.btn_adas = tk.Button(sys_frm, text="ADAS ASSIST: ON", bg="#9b59b6", fg="white", relief="flat", font=THEME["font_h"], command=self.controller.toggle_adas_mode)
         self.btn_adas.grid(row=2, column=1, sticky="ew", padx=3, pady=3)
+        self.btn_record = tk.Button(sys_frm, text="⏺ START RECORDING", bg="#c0392b", fg="white", relief="flat", font=("Helvetica", 9, "bold"), command=self.controller.toggle_recording)
+        self.btn_record.grid(row=3, column=0, columnspan=2, sticky="ew", padx=3, pady=3)
 
         # Drive Dynamics
         tab_drive = tk.Frame(mid_top_frm, bg=THEME["bg"])
@@ -88,13 +98,13 @@ class DashboardUI:
         dyn_frm = tk.LabelFrame(tab_drive, text="Drive Dynamics", bg=THEME["panel"], fg="white", font=THEME["font_h"])
         dyn_frm.pack(fill=tk.X, padx=5, pady=5)
         dyn_frm.columnconfigure(1, weight=1)
-        self.slider_base_speed = make_slider(dyn_frm, "Base Speed (PWM):", 0, 0, 500, 1, 150)
-        self.slider_sim_speed = make_slider(dyn_frm, "Map Sim Mult:", 1, 0.1, 3.0, 0.1, 1.0)
-        self.slider_steer_mult = make_slider(dyn_frm, "Steer Multiplier:", 2, 0.1, 3.0, 0.1, 1.0)
-        self.slider_overtake_dist = make_slider(dyn_frm, "Overtake Dist (m):", 3, 0.5, 5.0, 0.1, 1.2)
-        self.slider_overtake_time = make_slider(dyn_frm, "Overtake Time (s):", 4, 1.0, 5.0, 0.2, 2.0)
-        self.slider_sign_detect = make_slider(dyn_frm, "Sign Detect (m):", 5, 1.0, 10.0, 0.5, 5.0)
-        self.slider_sign_act = make_slider(dyn_frm, "Sign Act (m):", 6, 0.5, 5.0, 0.1, 2.0)
+        self.slider_base_speed    = make_slider(dyn_frm, "Base Speed (PWM):", 0, 0,   500,  1,   DASH_BASE_SPEED_DEFAULT)
+        self.slider_sim_speed     = make_slider(dyn_frm, "Map Sim Mult:",      1, 0.1, 3.0,  0.1, DASH_SIM_SPEED_DEFAULT)
+        self.slider_steer_mult    = make_slider(dyn_frm, "Steer Multiplier:",  2, 0.1, 3.0,  0.1, DASH_STEER_MULT_DEFAULT)
+        self.slider_overtake_dist = make_slider(dyn_frm, "Overtake Dist (m):", 3, 0.5, 5.0,  0.1, DASH_OVERTAKE_DIST_DEFAULT)
+        self.slider_overtake_time = make_slider(dyn_frm, "Overtake Time (s):", 4, 1.0, 5.0,  0.2, DASH_OVERTAKE_TIME_DEFAULT)
+        self.slider_sign_detect   = make_slider(dyn_frm, "Sign Detect (m):",   5, 1.0, 10.0, 0.5, DASH_SIGN_DETECT_DEFAULT)
+        self.slider_sign_act      = make_slider(dyn_frm, "Sign Act (m):",      6, 0.5, 5.0,  0.1, DASH_SIGN_ACT_DEFAULT)
 
         adas_frm = tk.LabelFrame(tab_drive, text="Active ADAS Responses", bg=THEME["panel"], fg="white", font=THEME["font_h"])
         adas_frm.pack(fill=tk.BOTH, expand=True, padx=5, pady=3)
@@ -140,8 +150,11 @@ class DashboardUI:
         self.log_text.configure(yscrollcommand=scroll_log.set)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         scroll_log.pack(side=tk.RIGHT, fill=tk.Y)
-        self.log_text.tag_config("INFO", foreground="#cccccc"); self.log_text.tag_config("WARN", foreground="orange")
-        self.log_text.tag_config("CRITICAL", foreground="#ff3333"); self.log_text.tag_config("SUCCESS", foreground="#00ff00")
+        self.log_text.tag_config("INFO",     foreground="#cccccc")
+        self.log_text.tag_config("WARN",     foreground="orange")
+        self.log_text.tag_config("CRITICAL", foreground="#ff3333")
+        self.log_text.tag_config("DANGER",   foreground="#ff3333")   # alias for CRITICAL
+        self.log_text.tag_config("SUCCESS",  foreground="#00ff00")
 
         # --- RIGHT PANEL (Map) ---
         right_frame = tk.Frame(main_panes, bg=THEME["bg"])
@@ -199,6 +212,10 @@ class DashboardUI:
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_text.config(state="normal")
         self.log_text.insert(tk.END, f"[{timestamp}] {message}\n", level)
+        # Keep the log widget bounded to avoid unbounded memory growth
+        line_count = int(self.log_text.index("end-1c").split(".")[0])
+        if line_count > _LOG_MAX_LINES:
+            self.log_text.delete("1.0", f"{line_count - _LOG_MAX_LINES}.0")
         self.log_text.see(tk.END)
         self.log_text.config(state="disabled")
 
