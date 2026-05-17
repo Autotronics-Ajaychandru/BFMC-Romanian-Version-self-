@@ -7,7 +7,19 @@
       "PowerShell(python -m pip install --no-deps Pillow networkx svglib reportlab lxml cssselect2 tinycss2 webencodings 2>&1)",
       "PowerShell(python -m pip uninstall -y torch torchvision ultralytics ultralytics-thop polars polars-runtime-32 scipy matplotlib contourpy fonttools kiwisolver 2>&1)",
       "Bash(cd \"e:\\\\\\\\BFMC-Romanian-Version\\\\\\\\BFMC_2026-main1\")",
-      "Bash(grep -E \"\\\\.py$\")"
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(where scp *)",
+      "Bash(where pscp *)",
+      "Bash(python -c \"import paramiko; print\\('paramiko ok'\\)\")",
+      "Bash(where sshpass *)",
+      "Bash(pip show *)",
+      "Bash(pip install *)",
+      "Bash(\"C:\\\\Users\\\\snira\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe\" -m pip install paramiko -q)",
+      "Bash(\"C:\\\\Users\\\\snira\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe\" -c \"import paramiko; print\\('paramiko', paramiko.__version__\\)\")",
+      "Bash(\"C:\\\\Users\\\\snira\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe\" -)",
+      "Bash('C:\\\\Users\\\\snira\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe' -c ' *)",
+      "Bash(python -c ' *)",
+      "Bash(del \"e:\\\\BFMC-Romanian-Version\\\\BFMC_2026-main1\\\\dashboard\\\\web_dashboard.py\")"
     ]
   }
 }

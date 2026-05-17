@@ -1,0 +1,2 @@
+timestamp,loop_hz,mode,speed_pwm,steer_deg,yaw_deg,roll_deg,pitch_deg,car_x,car_y,lane_anchor,target_x,lateral_err_px,lane_confidence,active_sign,yolo_labels
+09:15:50.215,0.7,MANUAL,0,0,0.0,0.0,0.0,0.5,0.5,,320.0,0.0,0.0,,

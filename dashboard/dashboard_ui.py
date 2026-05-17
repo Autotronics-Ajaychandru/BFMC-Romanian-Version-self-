@@ -49,7 +49,7 @@ class DashboardUI:
         self.btn_park_dash.pack(side=tk.LEFT, padx=5)
         self.lbl_imu = tk.Label(status, text="IMU: DISCONNECTED | R:0.0° P:0.0° Y:0.0°", bg=THEME["panel"], fg="grey", font=("Courier", 10, "bold"))
         self.lbl_imu.pack(side=tk.RIGHT, padx=15)
-        self.lbl_battery = tk.Label(status, text="BAT: --%", bg=THEME["panel"], fg="orange", font=("Courier", 10))
+        self.lbl_battery = tk.Label(status, text="BAT: --%", bg=THEME["panel"], fg=THEME["warning"], font=("Courier", 10))
         self.lbl_battery.pack(side=tk.RIGHT, padx=15)
         self.lbl_ai = tk.Label(status, text="AI: OFF", bg=THEME["panel"], fg="grey", font=("Courier", 10))
         self.lbl_ai.pack(side=tk.RIGHT, padx=15)
@@ -94,8 +94,8 @@ class DashboardUI:
         sys_frm.pack(fill=tk.X, padx=5, pady=(0, 5))
         sys_frm.columnconfigure(0, weight=1); sys_frm.columnconfigure(1, weight=1)
         
-        tk.Button(sys_frm, text="💾 Save Config", bg="#2980b9", fg="white", relief="flat", font=("Helvetica", 9, "bold"), command=self.controller.save_config).grid(row=0, column=0, sticky="ew", padx=3, pady=3)
-        tk.Button(sys_frm, text="📂 Load Config", bg="#27ae60", fg="white", relief="flat", font=("Helvetica", 9, "bold"), command=self.controller.load_config).grid(row=0, column=1, sticky="ew", padx=3, pady=3)
+        tk.Button(sys_frm, text="💾 Save Config", bg=THEME["accent"], fg="white", relief="flat", font=("Helvetica", 9, "bold"), command=self.controller.save_config).grid(row=0, column=0, sticky="ew", padx=3, pady=3)
+        tk.Button(sys_frm, text="📂 Load Config", bg=THEME["success"], fg="white", relief="flat", font=("Helvetica", 9, "bold"), command=self.controller.load_config).grid(row=0, column=1, sticky="ew", padx=3, pady=3)
         self.btn_connect = tk.Button(sys_frm, text="CONNECT CAR", bg=THEME["accent"], fg="white", relief="flat", font=("Helvetica", 10, "bold"), command=self.controller.toggle_connection)
         self.btn_connect.grid(row=1, column=0, columnspan=2, sticky="ew", padx=3, pady=3)
         self.btn_auto = tk.Button(sys_frm, text="MODE: MANUAL", bg="#444", fg="white", relief="flat", font=THEME["font_h"], command=self.controller.toggle_auto_mode)
@@ -160,7 +160,7 @@ class DashboardUI:
             font=("Courier", 9, "bold"),
         )
         self.lbl_loc.pack(side=tk.RIGHT, padx=(0, 10))
-        self.log_text = tk.Text(log_frm, height=4, bg="black", fg="#00ff00", font=("Courier", 10), state="disabled", relief="flat")
+        self.log_text = tk.Text(log_frm, height=4, bg=THEME["log_bg"], fg=THEME["log_fg"], font=("Courier", 10), state="disabled", relief="flat")
         scroll_log = ttk.Scrollbar(log_frm, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scroll_log.set)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
@@ -187,7 +187,7 @@ class DashboardUI:
         right_panes.pack(fill=tk.BOTH, expand=True, padx=5)
         map_container = tk.Frame(right_panes, bg=THEME["bg"])
         right_panes.add(map_container, weight=3)
-        self.map_canvas = tk.Canvas(map_container, bg="black", highlightthickness=0)
+        self.map_canvas = tk.Canvas(map_container, bg=THEME["canvas"], highlightthickness=0)
         
         # NOTE: Map bindings are now injected inside main.py initialization directly, allowing 
         # both Left & Right click without crossing files.
