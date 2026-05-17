@@ -20,11 +20,6 @@ from dashboard.map_engine import MapEngine
 from dashboard.adas_vision_utils import annotate_bev, JunctionDetector, RoundaboutNavigator
 from core.telemetry import TelemetryLogger
 
-try:
-    from dashboard.web_dashboard import WebDashboard
-    _WEB_AVAILABLE = True
-except ImportError:
-    _WEB_AVAILABLE = False
 
 try:
     from hardware.serial_handler import STM32_SerialHandler
@@ -186,12 +181,6 @@ class BFMC_App:
 
         # Telemetry logger (always on — writes to logs/)
         self.telemetry = TelemetryLogger()
-
-        # Web dashboard (opt-in via --web flag)
-        self.web: "WebDashboard | None" = None
-        if getattr(args, "web", False) and _WEB_AVAILABLE:
-            self.web = WebDashboard()
-            self.web.start()
 
         # Bindings & Loops
         if not self.headless:
@@ -395,12 +384,13 @@ class BFMC_App:
             self.ui.log_event(f"Starting {mode_str} parking playback...", "SUCCESS")
 
     def render_map(self):
-        if self.headless: return
         pil = self.map_engine.render_map(
             self.car_x, self.car_y, self.car_yaw,
             self.path, self.visited_path_nodes, self.path_signs,
             True, self.start_node, self.pass_nodes, self.end_node
         )
+        if self.headless:
+            return
         self.tk_map = ImageTk.PhotoImage(pil)
         self.ui.map_canvas.create_image(0, 0, anchor=tk.NW, image=self.tk_map)
         self.ui.map_canvas.config(scrollregion=self.ui.map_canvas.bbox(tk.ALL))
@@ -810,80 +800,42 @@ class BFMC_App:
         if frame is not None and self.telemetry.is_recording:
             self.telemetry.write_frame(frame)
 
-        # ── WEB DASHBOARD PUSH + COMMAND PROCESSING ──────────
-        if self.web is not None:
-            battery_v_web = getattr(self.handler.status, 'battery_voltage', 0.0) if hasattr(self.handler, 'status') else 0.0
-            bat_pct_web   = max(0, min(100, int((battery_v_web - BATTERY_MIN_V) / (BATTERY_MAX_V - BATTERY_MIN_V) * 100))) if battery_v_web > 0 else 0
-            self.web.push_telemetry(
-                mode             = "AUTO" if self.is_auto_mode else "MANUAL",
-                speed_pwm        = int(self.current_speed),
-                steer_deg        = round(self.current_steer, 2),
-                yaw_deg          = round(self.imu.get_yaw(), 2),
-                roll_deg         = round(self.imu.get_roll(), 2),
-                pitch_deg        = round(self.imu.get_pitch(), 2),
-                car_x            = round(self.car_x, 3),
-                car_y            = round(self.car_y, 3),
-                lane_anchor      = getattr(lane_result, 'anchor', ''),
-                target_x         = round(getattr(lane_result, 'target_x', 320.0), 1),
-                lateral_err_px   = round(getattr(lane_result, 'lateral_error_px', 0.0), 1),
-                lane_confidence  = round(getattr(lane_result, 'confidence', 0.0), 2),
-                active_sign      = active_sign_cmd or '',
-                yolo_labels      = ai_labels if 'ai_labels' in dir() else [],
-                battery_pct      = bat_pct_web,
-                loop_hz          = round(1.0 / dt, 1) if dt > 0 else 0.0,
-                is_recording     = self.telemetry.is_recording,
-                base_speed       = float(self.ui.slider_base_speed.get() if not self.headless else base_speed),
-                steer_mult       = float(self.ui.slider_steer_mult.get() if not self.headless else 1.0),
-                sign_detect_m    = float(self.ui.slider_sign_detect.get() if not self.headless else SIGN_DETECT_DEFAULT_M),
-                sign_act_m       = float(self.ui.slider_sign_act.get() if not self.headless else SIGN_ACT_DEFAULT_M),
-            )
-            if frame is not None:
-                self.web.push_frame(frame)
-
-            for web_cmd in self.web.pop_commands():
-                action = web_cmd.get("action", "")
-                value  = web_cmd.get("value")
-                if action == "e_stop":
-                    self.is_auto_mode = False
-                    self.current_speed = 0.0
-                    self.current_steer = 0.0
-                    if self.is_connected:
-                        self.handler.set_speed(0)
-                        self.handler.set_steering(0)
-                    if not self.headless:
-                        self.ui.log_event("🛑 WEB: Emergency Stop triggered!", "DANGER")
-                elif action == "toggle_auto":
-                    self.toggle_auto_mode()
-                elif action == "toggle_adas":
-                    self.toggle_adas_mode()
-                elif action == "clear_route":
-                    self.clear_route()
-                elif action == "start_recording":
-                    if not self.telemetry.is_recording:
-                        self.toggle_recording()
-                elif action == "stop_recording":
-                    if self.telemetry.is_recording:
-                        self.toggle_recording()
-                elif action == "set_base_speed" and value is not None and not self.headless:
-                    self.ui.slider_base_speed.set(float(value))
-                elif action == "set_steer_mult" and value is not None and not self.headless:
-                    self.ui.slider_steer_mult.set(float(value))
-                elif action == "set_sign_detect" and value is not None and not self.headless:
-                    self.ui.slider_sign_detect.set(float(value))
-                elif action == "set_sign_act" and value is not None and not self.headless:
-                    self.ui.slider_sign_act.set(float(value))
+        # ── ACTIVE INDICATOR KEYS (used by Tkinter UI + web) ─────
+        active_keys = []
+        if active_sign_cmd:
+            cmd_l = active_sign_cmd.lower()
+            if 'stop' in cmd_l: active_keys.append('stop_sign')
+            elif 'no_entry' in cmd_l or 'no-entry' in cmd_l: active_keys.append('no_entry')
+            elif 'pedestrian' in cmd_l or 'crosswalk' in cmd_l: active_keys.append('pedestrian')
+            elif 'highway' in cmd_l: active_keys.append('highway')
+            elif 'park' in cmd_l: active_keys.append('park')
+            else: active_keys.append('caution')
+        if getattr(self, 'active_blocks', None):
+            if self.active_blocks.get('crosswalk') or self.active_blocks.get('pedestrian'):
+                if 'pedestrian' not in active_keys: active_keys.append('pedestrian')
+            if self.active_blocks.get('priority'):
+                if 'caution' not in active_keys: active_keys.append('caution')
+        if getattr(self, 'in_highway_mode', False) and 'highway' not in active_keys:
+            active_keys.append('highway')
+        if behav_out:
+            ls = getattr(behav_out, 'light_status', '')
+            if 'RED' in ls: active_keys.append('red_light')
+            elif 'YELLOW' in ls: active_keys.append('yellow_light')
+            elif 'GREEN' in ls: active_keys.append('green_light')
+            if getattr(behav_out, 'parking_state', 'NONE') not in ('NONE', 'DONE'): active_keys.append('park')
+            if getattr(behav_out, 'state', '') == 'SYS_LANE_CHANGE_LEFT': active_keys.append('overtake')
+            if getattr(behav_out, 'zone_mode', '') == 'HIGHWAY': active_keys.append('highway')
 
         # ── UI UPDATES ────────────────────────────────────────
         if not self.headless:
             hz = 1.0 / dt if dt > 0 else 0.0
             self.current_hz = 0.8 * self.current_hz + 0.2 * hz
             self.ui.lbl_hz.config(text=f"{self.current_hz:.1f} Hz", fg="cyan")
-            
+
             mode_str = "AUTONOMOUS" if self.is_auto_mode else "MANUAL"
             if self.is_playing_back: mode_str = "REVERSE PARKING" if self.is_parking_reverse_mode else "PARKING PLAYBACK"
             if self.is_calibrating: mode_str = "CALIBRATING..."
-            
-            # Battery — calculated once and reused throughout this UI block
+
             battery_v   = getattr(self.handler.status, 'battery_voltage', 0.0) if hasattr(self.handler, 'status') else 0.0
             battery_pct = max(0, min(100, int((battery_v - BATTERY_MIN_V) / (BATTERY_MAX_V - BATTERY_MIN_V) * 100))) if battery_v > 0 else 0
             battery_color = "green" if battery_pct > 50 else "orange" if battery_pct > 20 else "red"
@@ -898,39 +850,8 @@ class BFMC_App:
             imu_values = f"R:{self.imu.get_roll():.1f}° P:{self.imu.get_pitch():.1f}° Y:{self.imu.get_yaw():.1f}°"
             self.ui.lbl_imu.config(text=f"{imu_text} | {imu_values}", fg=imu_color)
             self.ui.lbl_battery.config(text=f"BAT: {battery_pct}% ({battery_v:.1f}V)", fg=battery_color)
-            
-            # --- Update Indicators ---
-            active_keys = []
-            if active_sign_cmd:
-                cmd_l = active_sign_cmd.lower()
-                if 'stop' in cmd_l: active_keys.append('stop_sign')
-                elif 'no_entry' in cmd_l or 'no-entry' in cmd_l: active_keys.append('no_entry')
-                elif 'pedestrian' in cmd_l or 'crosswalk' in cmd_l: active_keys.append('pedestrian')
-                elif 'highway' in cmd_l: active_keys.append('highway')
-                elif 'park' in cmd_l: active_keys.append('park')
-                else: active_keys.append('caution')
-                
-            # Keep Indicators glowing if their internal logic blocks are still active
-            if getattr(self, 'active_blocks', None):
-                if self.active_blocks.get('crosswalk') or self.active_blocks.get('pedestrian'):
-                    if 'pedestrian' not in active_keys: active_keys.append('pedestrian')
-                if self.active_blocks.get('priority'):
-                    if 'caution' not in active_keys: active_keys.append('caution')
-                    
-            if getattr(self, 'in_highway_mode', False) and 'highway' not in active_keys:
-                active_keys.append('highway')
-                
-            if behav_out:
-                ls = getattr(behav_out, 'light_status', '')
-                if 'RED' in ls: active_keys.append('red_light')
-                elif 'YELLOW' in ls: active_keys.append('yellow_light')
-                elif 'GREEN' in ls: active_keys.append('green_light')
-                if getattr(behav_out, 'parking_state', 'NONE') not in ('NONE', 'DONE'): active_keys.append('park')
-                if getattr(behav_out, 'state', '') == 'SYS_LANE_CHANGE_LEFT': active_keys.append('overtake')
-                if getattr(behav_out, 'zone_mode', '') == 'HIGHWAY': active_keys.append('highway')
-            
+
             self.ui.update_indicators(active_keys)
-            # -------------------------
 
             self.render_map()
 
@@ -1011,7 +932,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="BFMC 2026 Unified Autonomous Stack")
     parser.add_argument("--headless", action="store_true", help="Run in terminal only, no Tkinter GUI")
     parser.add_argument("--no-v2x",  action="store_true", help="Do not start the background V2X servers")
-    parser.add_argument("--web",     action="store_true", help="Start the Flask web dashboard on port 8080")
     args = parser.parse_args()
 
     v2x_procs = []

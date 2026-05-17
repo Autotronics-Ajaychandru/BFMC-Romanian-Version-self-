@@ -17,7 +17,9 @@
       "Bash(\"C:\\\\Users\\\\snira\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe\" -m pip install paramiko -q)",
       "Bash(\"C:\\\\Users\\\\snira\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe\" -c \"import paramiko; print\\('paramiko', paramiko.__version__\\)\")",
       "Bash(\"C:\\\\Users\\\\snira\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe\" -)",
-      "Bash('C:\\\\Users\\\\snira\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe' -c ' *)"
+      "Bash('C:\\\\Users\\\\snira\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe' -c ' *)",
+      "Bash(python -c ' *)",
+      "Bash(del \"e:\\\\BFMC-Romanian-Version\\\\BFMC_2026-main1\\\\dashboard\\\\web_dashboard.py\")"
     ]
   }
 }

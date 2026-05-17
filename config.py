@@ -251,13 +251,6 @@ LOG_CSV_FIELDS = [
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  WEB DASHBOARD
-# ─────────────────────────────────────────────────────────────────────────────
-WEB_DASHBOARD_HOST      = "0.0.0.0"  # Listen on all interfaces (LAN-accessible)
-WEB_DASHBOARD_PORT      = 8080
-WEB_DASHBOARD_FPS       = 10         # MJPEG stream frame-rate cap
-
-# ─────────────────────────────────────────────────────────────────────────────
 #  LOCAL DASHBOARD — Slider defaults
 # ─────────────────────────────────────────────────────────────────────────────
 DASH_BASE_SPEED_DEFAULT     = 150.0
@@ -280,6 +273,8 @@ THEME = {
     "danger":  "#f44336",
     "success": "#4caf50",
     "warning": "#ff9800",
+    "log_bg":  "#0d1117",
+    "log_fg":  "#00ff00",
     "font_h":  ("Helvetica", 11, "bold"),
     "font_p":  ("Helvetica", 10),
     "sash":    "#333333",

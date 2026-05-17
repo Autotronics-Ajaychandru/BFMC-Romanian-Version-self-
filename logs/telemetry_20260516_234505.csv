@@ -1,0 +1,7 @@
+timestamp,loop_hz,mode,speed_pwm,steer_deg,yaw_deg,roll_deg,pitch_deg,car_x,car_y,lane_anchor,target_x,lateral_err_px,lane_confidence,active_sign,yolo_labels
+23:45:05.143,0.4,MANUAL,0,0,0.0,0.0,0.0,0.5,0.5,,320.0,0.0,0.0,,
+23:45:06.212,11.9,MANUAL,0,0,0.0,0.0,0.0,0.5,0.5,DEAD_RECKONING_1.00,320.0,0.0,0.0,,
+23:45:07.243,12.9,MANUAL,0,0,0.0,0.0,0.0,0.5,0.5,DEAD_RECKONING_1.00,320.0,0.0,0.0,,
+23:45:08.316,12.8,MANUAL,0,0,0.0,0.0,0.0,0.5,0.5,DEAD_RECKONING_1.00,320.0,0.0,0.0,,
+23:45:09.333,11.0,MANUAL,0,0,0.0,0.0,0.0,0.5,0.5,DEAD_RECKONING_1.00,320.0,0.0,0.0,,
+23:45:10.386,12.5,MANUAL,0,0,0.0,0.0,0.0,0.5,0.5,DEAD_RECKONING_1.00,320.0,0.0,0.0,,
