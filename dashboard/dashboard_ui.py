@@ -1,5 +1,6 @@
 import tkinter as tk
 from tkinter import ttk
+# pyrefly: ignore [missing-import]
 from PIL import Image, ImageTk
 from datetime import datetime
 from config import (
@@ -39,6 +40,13 @@ class DashboardUI:
             command=self.controller.open_imu_panel,
         )
         self.btn_imu_3d.pack(side=tk.LEFT, padx=5)
+        self.btn_park_dash = tk.Button(
+            status, text="🅿 OFF",
+            bg="#37474f", fg="white", relief="flat",
+            font=("Helvetica", 9, "bold"), activebackground="#546e7a",
+            command=self.controller.toggle_parking_dashboard,
+        )
+        self.btn_park_dash.pack(side=tk.LEFT, padx=5)
         self.lbl_imu = tk.Label(status, text="IMU: DISCONNECTED | R:0.0° P:0.0° Y:0.0°", bg=THEME["panel"], fg="grey", font=("Courier", 10, "bold"))
         self.lbl_imu.pack(side=tk.RIGHT, padx=15)
         self.lbl_battery = tk.Label(status, text="BAT: --%", bg=THEME["panel"], fg="orange", font=("Courier", 10))

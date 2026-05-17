@@ -21,6 +21,11 @@ from dashboard.adas_vision_utils import annotate_bev, JunctionDetector, Roundabo
 from core.telemetry import TelemetryLogger
 
 try:
+    from parking.parking import ParkingSystem
+except ImportError:
+    ParkingSystem = None
+
+try:
     from dashboard.web_dashboard import WebDashboard
     _WEB_AVAILABLE = True
 except ImportError:
@@ -166,6 +171,11 @@ class BFMC_App:
         self.is_playing_back = False
         self.is_parking_reverse_mode = False
         self.playback_queue = []; self.playback_cmd = None; self.playback_frames = 0
+        
+        if ParkingSystem is not None:
+            self.parking_system = ParkingSystem(debug_dashboard=False)
+        else:
+            self.parking_system = None
 
         # Autonomous Pipelines (Lane Detection)
         self.is_auto_mode    = False
@@ -403,6 +413,24 @@ class BFMC_App:
     def on_parking_toggle(self):
         pass
 
+    def toggle_parking_dashboard(self):
+        self.parking_dashboard_open = not getattr(self, 'parking_dashboard_open', False)
+        print("[Parking Dashboard] Button Clicked")
+        print(f"[Parking Dashboard] state: {self.parking_dashboard_open}")
+        
+        if not self.headless:
+            if self.parking_dashboard_open:
+                self.ui.btn_park_dash.config(text="🅿 ACTIVE", fg="#00ff00")
+                self.ui.log_event("🅿 Parking Dashboard OPENED", "INFO")
+            else:
+                self.ui.btn_park_dash.config(text="🅿 OFF", fg="white")
+                self.ui.log_event("🅿 Parking Dashboard CLOSED", "INFO")
+                # Attempt to close the OpenCV window gracefully
+                try:
+                    cv2.destroyWindow("BFMC Parking Dashboard")
+                except:
+                    pass
+
     def toggle_connection(self):
         if not self.is_connected:
             if self.handler.connect():
@@ -450,6 +478,14 @@ class BFMC_App:
         
         # 1. Grab Frame
         frame = self.camera.read_frame()
+        
+        if getattr(self, 'parking_dashboard_open', False):
+            try:
+                if self.parking_system:
+                    self.parking_system.render_dashboard(frame)
+            except Exception as e:
+                print(f"[Dashboard Error] {e}")
+
         lane_result = None
         t_res = None
         behav_out = None
@@ -470,6 +506,48 @@ class BFMC_App:
                 t_res = self.traffic_engine.process(frame, line_type)
                 if t_res and hasattr(t_res, 'active_labels'):
                     ai_labels = t_res.active_labels
+            
+            # --- PARKING SYSTEM UPDATE ---
+            parking_out = None
+            if self.parking_system:
+                try:
+                    real_imu = {
+                        "accel_x": getattr(self.imu, 'get_accel_x', lambda: 0.0)(),
+                        "accel_y": getattr(self.imu, 'get_accel_y', lambda: 0.0)(),
+                        "accel_forward": getattr(self.imu, 'get_accel_forward', lambda: 0.0)(),
+                        "gyro_x": getattr(self.imu, 'get_gyro_x', lambda: 0.0)(),
+                        "gyro_y": getattr(self.imu, 'get_gyro_y', lambda: 0.0)(),
+                        "gyro_z": getattr(self.imu, 'get_gyro_z', lambda: 0.0)(),
+                        "roll": self.imu.get_roll() if hasattr(self.imu, 'get_roll') else 0.0,
+                        "pitch": self.imu.get_pitch() if hasattr(self.imu, 'get_pitch') else 0.0,
+                        "yaw": self.imu.get_yaw() if hasattr(self.imu, 'get_yaw') else 0.0
+                    }
+                    
+                    pedestrian_detected = any(label.lower() in ["pedestrian", "person"] for label in ai_labels)
+                    reverse_parking_done = not self.is_playing_back and not getattr(self, 'is_waiting_for_reverse', False)
+                    
+                    parking_out = self.parking_system.update(
+                        frame=frame,
+                        dt=dt,
+                        real_imu=real_imu,
+                        reverse_parking_done=reverse_parking_done,
+                        autonomous_mode=self.is_auto_mode,
+                        pedestrian_detected=pedestrian_detected
+                    )
+                except Exception as e:
+                    print(f"[Parking Runtime Error] {e}")
+                    parking_out = {
+                        "parking_completed": False,
+                        "parking_failed": False,
+                        "selected_slot": None,
+                        "selected_side": None,
+                        "occupancy_status": {},
+                        "trajectory": None,
+                        "speed_multiplier": 1.0,
+                        "parking_mode_active": False,
+                        "parking_takeover": False
+                    }
+            # -----------------------------
             
             # 4. Update Path Sign States (Distance + AI Vision)
             detect_dist = float(self.ui.slider_sign_detect.get() if not self.headless else 5.0)
@@ -519,14 +597,16 @@ class BFMC_App:
                     self.crosswalk_timer = time.time() + CROSSWALK_HOLD_S
                 elif "priority" in active_sign_cmd.lower():
                     self.priority_timer = time.time() + PRIORITY_HOLD_S
-                elif "park" in active_sign_cmd.lower():
-                    if not getattr(self, 'has_parked_here', False):
-                        self.execute_parking_playback(reverse=False)
-                        self.has_parked_here = True
-            
-            if not active_sign_cmd or "park" not in active_sign_cmd.lower():
-                self.has_parked_here = False
             # ------------------------------------
+            
+            if parking_out and parking_out.get("parking_takeover"):
+                if not self.is_playing_back and parking_out.get("trajectory"):
+                    # Use the trajectory directly
+                    self.playback_queue = parking_out["trajectory"].copy()
+                    self.is_playing_back = True
+                    self.is_parking_reverse_mode = True
+                    if not self.headless:
+                        self.ui.log_event("🅿️ Parking Takeover Active: Loading Trajectory", "WARN")
             
             if active_sign_cmd and not self.headless:
                 if active_sign_cmd != self.last_logged_cmd:
@@ -585,6 +665,10 @@ class BFMC_App:
                             target_speed *= PRIORITY_SPEED_MULT
                         if is_highway:
                             target_speed *= HIGHWAY_SPEED_MULT
+                            
+                        # Background Parking Observer
+                        if parking_out and not parking_out.get("parking_takeover"):
+                            target_speed *= parking_out.get("speed_multiplier", 1.0)
                         # --------------------------------------------------------
                 else:
                     self.is_calibrating = True
@@ -631,13 +715,19 @@ class BFMC_App:
             # If no current command is loaded or its duration is over, grab the next
             if self.playback_cmd is None or self.playback_frames <= 0:
                 if self.playback_queue:
-                    self.playback_cmd = self.playback_queue.pop(0)
-                    self.playback_frames = self.playback_cmd.get("duration_fr", 1)
+                    # Only pop if no pedestrian is detected (Pause trajectory execution)
+                    if not any(label.lower() in ["pedestrian", "person"] for label in (ai_labels if 'ai_labels' in locals() else [])):
+                        self.playback_cmd = self.playback_queue.pop(0)
+                        self.playback_frames = self.playback_cmd.get("duration_fr", 1)
                 else:
                     self.playback_cmd = None
             
             if self.playback_cmd:
-                self.playback_frames -= 1
+                # Only decrement frames if no pedestrian
+                is_pedestrian = any(label.lower() in ["pedestrian", "person"] for label in (ai_labels if 'ai_labels' in locals() else []))
+                if not is_pedestrian:
+                    self.playback_frames -= 1
+                    
                 cmd = self.playback_cmd
                 
                 # If PWM is available, use it directly with the direction multiplier.
@@ -651,7 +741,8 @@ class BFMC_App:
                 else:
                     target_speed = cmd["speed"] * dir_mult
                     
-                target_steer = cmd["steer"]
+                if is_pedestrian:
+                    target_speed = 0.0 # Force stop for pedestrian
                 
                 # Log parking playback once per second
                 if not getattr(self, '_last_park_log_time', 0) or time.time() - self._last_park_log_time > 1.0:

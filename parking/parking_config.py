@@ -1,0 +1,21 @@
+# parking_config.py
+
+# Vision & Detection Configuration
+CONF_THRESHOLD = 0.5
+SIGN_CONFIRM_FRAMES = 3
+DEBOUNCE_DURATION = 1.0
+
+# Parking Slot Geometry
+MAX_SLOTS = 5
+SLOT_LENGTH_CM = 50.0
+
+# IMU Tracking
+IMU_DEADBAND = 0.05
+VELOCITY_DAMPING = 0.98
+
+# Maneuver Timing
+REVERSE_TIMEOUT = 15.0
+
+# Control
+PARKING_SPEED_MULTIPLIER = 0.30
+NORMAL_SPEED_MULTIPLIER = 1.0
